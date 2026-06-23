@@ -1,0 +1,57 @@
+# seam-voice 설정 — 모든 옵션을 여기서 조정한다.
+# 변경 후 메뉴 "설정 다시 읽기" 또는 앱 재시작으로 반영.
+
+storage:
+  base_dir: "~/seam-voice-data"        # raw_audio / reports / .state 가 이 아래에 생성됨
+
+schedule:
+  enabled: true
+  days: [mon, tue, wed, thu, fri]      # 녹음 허용 요일
+  windows:
+    - ["09:00", "17:00"]               # 허용 시간대(여러 구간 가능)
+  lunch:
+    - ["12:00", "13:00"]               # 이 구간은 제외(점심)
+
+audio:
+  sample_rate: 16000                   # whisper 권장 16kHz (webrtcvad: 8k/16k/32k/48k만 허용)
+  channels: 1
+  frame_ms: 30                         # webrtcvad 프레임(10/20/30 만 허용)
+  vad_aggressiveness: 2                # 0(둔감)~3(민감)
+  ring_buffer_sec: 0.3                 # 발화 시작 전 붙일 프리롤(말 시작 잘림 방지)
+  silence_timeout_sec: 1.2             # 이만큼 조용하면 구간 종료
+  min_segment_sec: 1.0                 # 이보다 짧은 구간은 폐기
+  max_segment_sec: 600                 # 한 구간 최대 길이(안전장치)
+
+transcription:
+  engine: "faster-whisper"             # faster-whisper | whisper.cpp(추후)
+  model: "large-v3"                    # large-v3 | large-v3-turbo
+  device: "auto"                       # auto | cpu | cuda
+  compute_type: "int8"                 # int8 | int8_float16 | float16
+  language: "ko"
+  beam_size: 5
+
+diarization:
+  enabled: false                       # 화자 분리(pyannote) — 미구현 스텁
+  hf_token: ""                         # Hugging Face 토큰
+  max_speakers: 2
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434"
+  model: "qwen2.5:7b"
+  timeout_sec: 120
+
+retention_rules:
+  raw_audio_days: 7                    # 원본 보관 일수(이후 자동 삭제)
+  max_storage_gb: 20                   # 용량 상한 — 초과 시 오래된 것부터 삭제
+  discard_non_participated: true       # 내가 참여 안 한 대화는 삭제(법적 안전, 유지 권장)
+  keep_keywords:                       # 이 단어가 들어가면 무조건 보관
+    - "마감"
+    - "결정"
+    - "예산"
+    - "일정"
+
+processing:
+  batch_time: "18:00"                  # 하루 1회 자동 일괄 처리 시각
+  require_ac_power: true               # 받아쓰기/요약은 전원 연결 시에만
+  delete_audio_after_discard: true     # keep=false 판정 시 해당 오디오 즉시 삭제

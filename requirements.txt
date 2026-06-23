@@ -1,0 +1,8 @@
+sounddevice>=0.4.6
+webrtcvad>=2.0.10
+numpy>=1.24
+faster-whisper>=1.0.0
+requests>=2.31
+PyYAML>=6.0
+rumps>=0.4.0
+# 선택(화자분리): pyannote.audio>=3.1  (Hugging Face 토큰 필요)

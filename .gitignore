@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 로컬 데이터(녹음/리포트/상태) — 절대 커밋 금지
+seam-voice-data/
+~/seam-voice-data/
+
+# macOS
+.DS_Store
+
+# 모델 캐시
+*.bin
