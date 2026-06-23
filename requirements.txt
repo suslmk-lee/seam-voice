@@ -1,8 +1,14 @@
+# 런타임
 sounddevice>=0.4.6
 webrtcvad>=2.0.10
 numpy>=1.24
 faster-whisper>=1.0.0
-requests>=2.31
 PyYAML>=6.0
-rumps>=0.4.0
+pywebview>=5.0           # 데스크톱 UI(웹뷰). macOS는 pyobjc 의존 자동 설치
+llama-cpp-python>=0.2.90 # 인프로세스 GGUF LLM(Ollama 불필요). Apple Silicon Metal 빌드
+huggingface_hub>=0.23    # 첫 실행 시 GGUF 모델 자동 다운로드
+
+# 빌드(패키징, 단일 .app)
+# pip install pyinstaller>=6.0
+
 # 선택(화자분리): pyannote.audio>=3.1  (Hugging Face 토큰 필요)

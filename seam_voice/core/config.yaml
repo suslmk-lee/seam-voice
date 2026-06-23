@@ -1,5 +1,6 @@
 # seam-voice 설정 — 모든 옵션을 여기서 조정한다.
-# 변경 후 메뉴 "설정 다시 읽기" 또는 앱 재시작으로 반영.
+# 패키지된 앱에서는 이 파일이 ~/Library/Application Support/seam-voice/config.yaml 로
+# 복사되어 사용된다(앱 안에서 "설정" 탭으로 편집 가능). 개발 시 SEAM_VOICE_CONFIG 로 override.
 
 storage:
   base_dir: "~/seam-voice-data"        # raw_audio / reports / .state 가 이 아래에 생성됨
@@ -36,10 +37,14 @@ diarization:
   max_speakers: 2
 
 llm:
-  provider: "ollama"
-  base_url: "http://localhost:11434"
-  model: "qwen2.5:7b"
-  timeout_sec: 120
+  provider: "llama-cpp"                # 인프로세스 GGUF (Ollama 불필요)
+  model_repo: "bartowski/Qwen2.5-7B-Instruct-GGUF"   # 첫 실행 시 자동 다운로드
+  model_file: "Qwen2.5-7B-Instruct-Q4_K_M.gguf"      # 약 4.7GB
+  model_path: ""                       # 직접 받은 .gguf 경로를 쓰려면 여기에(설정 시 repo 무시)
+  n_ctx: 8192
+  n_gpu_layers: -1                     # Apple Silicon Metal: -1=전체 GPU 오프로드
+  temperature: 0.2
+  max_tokens: 1024
 
 retention_rules:
   raw_audio_days: 7                    # 원본 보관 일수(이후 자동 삭제)

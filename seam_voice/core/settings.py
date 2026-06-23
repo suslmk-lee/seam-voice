@@ -1,6 +1,7 @@
 """설정 로드/저장 + 스케줄·일시정지 판단.
 
 - ``config.yaml`` 을 읽어 점(.) 표기로 값을 꺼내고(``get``) 저장한다.
+  경로는 기본적으로 사용자별 쓰기 가능 위치(:func:`paths.user_config_path`).
 - ``is_within_schedule()`` : 지금이 녹음 허용 요일·시간대(점심 제외)인지.
 - ``pause_for()`` / ``is_paused()`` : ``.state/paused_until.txt`` 기반 일시정지.
 순수 로직(스케줄/일시정지)은 외부 의존성 없이 단위 테스트 가능하다.
@@ -14,8 +15,7 @@ from pathlib import Path
 
 import yaml
 
-PACKAGE_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG_PATH = PACKAGE_DIR / "config.yaml"
+from .paths import user_config_path
 
 _WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
@@ -45,8 +45,8 @@ def is_on_ac_power() -> bool:
 
 
 class Settings:
-    def __init__(self, config_path: Path | str = DEFAULT_CONFIG_PATH):
-        self.config_path = Path(config_path)
+    def __init__(self, config_path: Path | str | None = None):
+        self.config_path = Path(config_path) if config_path else user_config_path()
         self.data: dict = {}
         self.reload()
 

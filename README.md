@@ -1,64 +1,89 @@
 # seam-voice
 
-사무실 자리에서 오가는 대화를 **전부 로컬로** 녹음·받아쓰기·요약하는 macOS 메뉴바 앱.
-네트워크를 쓰지 않으며(외부 STT/LLM 금지), 받아쓰기는 faster-whisper, 분류·요약은 Ollama 로컬 LLM으로 한다.
+사무실 자리에서 오가는 대화를 **전부 로컬로** 녹음·받아쓰기·요약하는 macOS 데스크톱 앱.
+네트워크를 쓰지 않으며(외부 STT/LLM 금지), 받아쓰기는 faster-whisper, 분류·요약은
+**llama-cpp-python(인프로세스 GGUF)** 로 한다 — Ollama 같은 별도 데몬이 필요 없다.
 
-## 동작 개요
+UI는 **pywebview**(웹 UI를 macOS WKWebView에 표시)이고, **PyInstaller**로 더블클릭
+실행하는 단일 `seam-voice.app` 으로 패키징한다.
+
+## 구조
 
 ```
-메뉴바 앱 (menubar.py)
- ├─ 녹음 데몬 (recorder.py)  : 허용 시간대 ∧ ¬일시정지일 때 webrtcvad로 발화 구간만 WAV 저장
- └─ 일괄 처리 (processor.py) : faster-whisper 받아쓰기 → Ollama 분류(보관/삭제) → 일일 요약
-                               → 날짜별 마크다운 리포트 → 7일/용량 초과 원본 정리
+seam_voice/
+├─ app.py            # pywebview 윈도우 + JS↔Python 브리지(Api) + 자동처리 스케줄러
+├─ core/             # UI 비의존 코어
+│  ├─ paths.py       # 번들/사용자 경로(개발·동결 모두 대응)
+│  ├─ settings.py    # config 로드·저장 + 스케줄/일시정지/AC전원
+│  ├─ recorder.py    # webrtcvad 발화 구간만 WAV 저장(백그라운드 스레드)
+│  ├─ llm.py         # llama-cpp-python 래퍼(첫 실행 시 모델 다운로드)
+│  ├─ processor.py   # faster-whisper 받아쓰기 → 분류 → 요약 → 리포트 → 정리
+│  └─ config.yaml    # 기본 설정(앱 첫 실행 시 사용자 위치로 복사됨)
+└─ webui/            # index.html / style.css / app.js
 ```
 
 데이터(기본 `~/seam-voice-data`, `config.yaml`의 `storage.base_dir`로 변경):
 
 - `raw_audio/YYYY-MM-DD/HH-MM-SS_Ns.wav` — 발화 구간 (7일 후 삭제)
 - `reports/YYYY-MM-DD.md` — 받아쓰기 + 요약
-- `.state/paused_until.txt` — 일시정지 상태
 
-## 셋업
+설정/모델 캐시(패키지 앱):
+
+- `~/Library/Application Support/seam-voice/config.yaml` — 사용자 설정(앱 "설정" 탭에서 편집)
+- `~/Library/Application Support/seam-voice/models/` — GGUF 모델 캐시
+
+## 개발 실행
 
 ```bash
-cd /workspace/seam-voice
+cd /Users/minkyu/workspace/seam-voice
 pip install -r requirements.txt          # webrtcvad 컴파일 필요 시: xcode-select --install
-brew install ollama && ollama serve
-ollama pull qwen2.5:7b
-python -m seam_voice.menubar             # 마이크 권한 허용 필요
+python -m seam_voice.app                 # 앱 창 실행 (첫 녹음 시 마이크 권한 허용)
 ```
 
-개별 실행:
+코어 모듈 단독 실행(디버깅):
 
 ```bash
-python -m seam_voice.recorder            # 녹음 데몬만
-python -m seam_voice.processor           # 오늘 일괄 처리
-python -m seam_voice.processor 2026-06-23  # 특정 날짜
+python -m seam_voice.core.recorder              # 녹음기만
+python -m seam_voice.core.processor 2026-06-23  # 특정 날짜 일괄 처리
 ```
 
-## 설정
+> 개발 중 `core/config.yaml` 변경을 바로 보려면 사용자 복사본을 지우거나
+> `SEAM_VOICE_CONFIG=/path/to/config.yaml` 로 override 한다.
 
-모든 옵션은 `seam_voice/config.yaml`에 있다. 주요 항목:
+## 단일 .app 빌드
+
+```bash
+pip install pyinstaller
+pyinstaller seam-voice.spec
+open dist/seam-voice.app                  # 더블클릭 실행
+```
+
+- `llama-cpp-python` 은 Apple Silicon에서 Metal 빌드로 설치돼야 GPU 오프로드(`n_gpu_layers: -1`)가 동작한다.
+- 처음 실행하면 GGUF 모델(약 4.7GB)과 faster-whisper `large-v3`(약 3GB)를 다운로드한다.
+- 서명 없이 배포 시 Gatekeeper가 막으므로, 본인 맥은 우클릭 → 열기. 외부 배포는 코드서명+공증 필요.
+- 네이티브 패키지가 많아 첫 빌드는 spec 조정이 필요할 수 있다(자세한 건 `docs/HANDOFF.md`).
+
+## 설정 (`config.yaml`)
 
 | 키 | 설명 |
 |---|---|
-| `storage.base_dir` | 데이터 저장 위치 |
+| `storage.base_dir` | 녹음/리포트 저장 위치 |
 | `schedule.{days,windows,lunch}` | 녹음 허용 요일/시간대/점심 제외 |
 | `audio.*` | VAD 민감도·프리롤·무음 종료·최소 구간 길이 |
 | `transcription.{model,device,compute_type}` | faster-whisper 설정 |
-| `llm.{model,base_url}` | Ollama 모델/주소 |
-| `retention_rules.{raw_audio_days,max_storage_gb,discard_non_participated,keep_keywords}` | 보관 정책 |
+| `llm.{model_repo,model_file,model_path,n_gpu_layers}` | 로컬 GGUF LLM |
+| `retention_rules.*` | 보관 일수/용량/제3자 대화 폐기/키워드 |
 | `processing.{batch_time,require_ac_power}` | 자동 처리 시각/전원 조건 |
 
 ## 프라이버시 / 법적 제약 (유지)
 
 - 한국 통신비밀보호법: **본인이 참여한 대화** 녹음은 합법이나 **제3자 대화**는 회색지대 →
   `retention_rules.discard_non_participated`를 기본 ON으로 둔다.
-- 녹음 중 메뉴바 마이크 표시는 동료가 인지할 수 있도록 **숨기지 않는다.**
-- 전부 로컬·네트워크 미사용 원칙을 유지한다. 외부 API/클라우드 STT·LLM은 도입하지 않는다.
+- 녹음 중에는 macOS 마이크 표시가 노출돼 동료가 인지할 수 있다 — 숨기지 않는다.
+- 전부 로컬·네트워크 미사용 원칙을 유지한다(모델 최초 다운로드 제외). 외부 API/클라우드 STT·LLM은 도입하지 않는다.
 
 ## 상태
 
-프로토타입. 스케줄/일시정지 로직은 검증됨. 실기기(M4)에서 마이크 녹음·받아쓰기·요약 품질은
-스모크 테스트 필요. 화자 분리(pyannote)는 미구현 스텁(기본 off). 자세한 배경·백로그는
-`docs/HANDOFF.md` 참고.
+프로토타입. 스케줄/일시정지/리포트 로직은 검증됨. 실기기(M4)에서 마이크 녹음·받아쓰기·
+LLM 분류/요약 품질, pywebview UI, .app 빌드는 스모크 테스트 필요. 화자 분리(pyannote)는
+미구현 스텁(기본 off). 배경·백로그는 `docs/HANDOFF.md` 참고.

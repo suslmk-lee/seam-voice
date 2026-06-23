@@ -1,4 +1,4 @@
-"""시간대 + VAD로 말소리 구간만 WAV로 저장하는 녹음 데몬.
+"""시간대 + VAD로 말소리 구간만 WAV로 저장하는 녹음기.
 
 webrtcvad 프레임(기본 30ms) 단위로 발화를 감지한다. 발화 시작 전
 ``ring_buffer_sec`` 만큼을 ring buffer로 붙여 말 시작 잘림을 막고,
@@ -6,6 +6,7 @@ webrtcvad 프레임(기본 30ms) 단위로 발화를 감지한다. 발화 시작
 미만 구간은 폐기한다. 매 루프에서 스케줄/일시정지를 확인해, 허용 시간대가
 아니거나 일시정지면 진행 중 구간을 비우고 대기한다.
 
+앱에서는 ``run()`` 을 백그라운드 스레드로 돌리고 ``stop()`` 으로 종료한다.
 저장: ``raw_audio/YYYY-MM-DD/HH-MM-SS_Ns.wav``
 """
 from __future__ import annotations
@@ -80,7 +81,7 @@ class Recorder:
             try:
                 signal.signal(sig, self.stop)
             except (ValueError, OSError):
-                pass  # 메인 스레드가 아니면 무시
+                pass  # 메인 스레드가 아니면(앱 내 스레드 실행) 무시
 
     # ---- 메인 루프 ----------------------------------------------------
     def run(self) -> None:

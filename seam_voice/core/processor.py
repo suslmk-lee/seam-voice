@@ -2,14 +2,14 @@
 
 흐름:
 1. ``raw_audio/<날짜>/*.wav`` 를 faster-whisper로 받아쓰기.
-2. 분류: ``keep_keywords`` 우선 매칭 → 없으면 Ollama가 JSON으로 판정
+2. 분류: ``keep_keywords`` 우선 매칭 → 없으면 로컬 LLM이 JSON으로 판정
    (``keep / category / participated / reason``). ``discard_non_participated``
    가 켜져 있고 LLM이 "내가 안 낀 대화"로 보면 keep=false. LLM 실패 시 보관.
-3. 보관분으로 Ollama 일일 요약.
+3. 보관분으로 로컬 LLM 일일 요약.
 4. ``reports/<날짜>.md`` 마크다운 리포트 작성.
 5. 7일/용량 초과 원본 정리.
 
-사용: ``python -m seam_voice.processor [YYYY-MM-DD]`` (날짜 생략 시 오늘)
+사용: ``python -m seam_voice.core.processor [YYYY-MM-DD]`` (날짜 생략 시 오늘)
 """
 from __future__ import annotations
 
@@ -18,10 +18,12 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Callable
 
-import requests
-
+from .llm import LocalLLM
 from .settings import Settings, is_on_ac_power
+
+Progress = Callable[[int, int, str], None]
 
 _CLASSIFY_PROMPT = """당신은 사무실 대화 기록 분류기다. 아래 받아쓰기를 읽고 JSON 객체로만 답하라.
 필드:
@@ -46,25 +48,6 @@ _SUMMARY_PROMPT = """다음은 하루치 사무실 대화 받아쓰기 모음이
 대화 모음:
 {joined}
 """
-
-
-# ---- LLM (Ollama) -----------------------------------------------------
-def _ollama_generate(prompt: str, settings: Settings, *, fmt: str | None = None) -> str:
-    base = str(settings.get("llm.base_url", "http://localhost:11434")).rstrip("/")
-    payload = {
-        "model": settings.get("llm.model", "qwen2.5:7b"),
-        "prompt": prompt,
-        "stream": False,
-    }
-    if fmt:
-        payload["format"] = fmt
-    resp = requests.post(
-        f"{base}/api/generate",
-        json=payload,
-        timeout=int(settings.get("llm.timeout_sec", 120)),
-    )
-    resp.raise_for_status()
-    return resp.json().get("response", "")
 
 
 # ---- 받아쓰기 ---------------------------------------------------------
@@ -97,7 +80,7 @@ def diarize(wav_path: Path, settings: Settings):
 
 
 # ---- 분류 -------------------------------------------------------------
-def classify(text: str, settings: Settings) -> dict:
+def classify(text: str, settings: Settings, llm: LocalLLM | None = None) -> dict:
     for kw in settings.get("retention_rules.keep_keywords", []) or []:
         if kw and kw in text:
             return {
@@ -108,8 +91,9 @@ def classify(text: str, settings: Settings) -> dict:
                 "by": "keyword",
             }
 
+    llm = llm or LocalLLM(settings)
     try:
-        raw = _ollama_generate(_CLASSIFY_PROMPT.format(text=text[:4000]), settings, fmt="json")
+        raw = llm.generate(_CLASSIFY_PROMPT.format(text=text[:4000]), as_json=True)
         data = json.loads(raw)
         result = {
             "keep": bool(data.get("keep", True)),
@@ -134,8 +118,9 @@ def classify(text: str, settings: Settings) -> dict:
 
 
 # ---- 요약 -------------------------------------------------------------
-def summarize_day(joined: str, settings: Settings) -> str:
-    return _ollama_generate(_SUMMARY_PROMPT.format(joined=joined[:12000]), settings).strip()
+def summarize_day(joined: str, settings: Settings, llm: LocalLLM | None = None) -> str:
+    llm = llm or LocalLLM(settings)
+    return llm.generate(_SUMMARY_PROMPT.format(joined=joined[:12000])).strip()
 
 
 # ---- 리포트 -----------------------------------------------------------
@@ -208,29 +193,44 @@ def cleanup(settings: Settings) -> None:
 
 
 # ---- 오케스트레이션 ---------------------------------------------------
-def process_day(date_str: str | None = None, settings: Settings | None = None) -> Path | None:
+def process_day(
+    date_str: str | None = None,
+    settings: Settings | None = None,
+    llm: LocalLLM | None = None,
+    progress: Progress | None = None,
+) -> Path | None:
+    def report_progress(done: int, total: int, phase: str) -> None:
+        if progress:
+            progress(done, total, phase)
+
     settings = settings or Settings()
     settings.ensure_dirs()
     date_str = date_str or dt.date.today().isoformat()
 
     if settings.get("processing.require_ac_power", True) and not is_on_ac_power():
+        report_progress(0, 0, "전원 미연결 — 일괄 처리 건너뜀")
         print("[processor] 전원 미연결 — 일괄 처리 건너뜀.")
         return None
 
+    llm = llm or LocalLLM(settings)
     day_dir = settings.raw_audio_dir / date_str
     wavs = sorted(day_dir.glob("*.wav")) if day_dir.exists() else []
-    print(f"[processor] {date_str}: WAV {len(wavs)}개 처리 시작")
+    total = len(wavs)
+    print(f"[processor] {date_str}: WAV {total}개 처리 시작")
+    report_progress(0, total, "받아쓰기 준비")
 
     model = None
     kept: list[dict] = []
     discarded: list[dict] = []
-    for wav in wavs:
+    for i, wav in enumerate(wavs, 1):
         if model is None:
+            report_progress(i - 1, total, "Whisper 모델 로딩")
             model = load_whisper(settings)  # 첫 파일에서만 로드
+        report_progress(i - 1, total, f"받아쓰기 {i}/{total}")
         text = transcribe_file(model, wav, settings)
         if not text:
             continue
-        verdict = classify(text, settings)
+        verdict = classify(text, settings, llm=llm)
         item = {"file": wav.name, "text": text, **verdict}
         if verdict["keep"]:
             kept.append(item)
@@ -241,9 +241,10 @@ def process_day(date_str: str | None = None, settings: Settings | None = None) -
 
     summary = ""
     if kept:
+        report_progress(total, total, "요약 중")
         joined = "\n\n".join(f"[{k['file']}] {k['text']}" for k in kept)
         try:
-            summary = summarize_day(joined, settings)
+            summary = summarize_day(joined, settings, llm=llm)
         except Exception as exc:
             summary = f"(요약 실패: {exc})"
 
@@ -252,7 +253,9 @@ def process_day(date_str: str | None = None, settings: Settings | None = None) -
     report_path.write_text(report, encoding="utf-8")
 
     cleanup(settings)
-    print(f"[processor] 리포트: {report_path} (보관 {len(kept)} / 삭제 {len(discarded)})")
+    msg = f"완료 (보관 {len(kept)} / 삭제 {len(discarded)})"
+    report_progress(total, total, msg)
+    print(f"[processor] 리포트: {report_path} — {msg}")
     return report_path
 
 

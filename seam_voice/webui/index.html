@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>seam-voice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="dot" id="dot"></span>
+      <h1>seam-voice</h1>
+    </div>
+    <div class="meta">
+      <span id="status-pill" class="pill off">정지</span>
+      <span id="schedule" class="tag">—</span>
+      <span id="llm" class="tag">LLM: —</span>
+    </div>
+  </header>
+
+  <section class="controls">
+    <div class="group">
+      <button id="btn-start" class="primary">● 녹음 시작</button>
+      <button id="btn-stop">■ 정지</button>
+    </div>
+    <div class="group">
+      <span class="lbl">일시정지</span>
+      <button data-pause="15">15분</button>
+      <button data-pause="30">30분</button>
+      <button data-pause="60">60분</button>
+      <button id="btn-resume">해제</button>
+    </div>
+    <div class="group">
+      <button id="btn-process">⟳ 지금 일괄 처리</button>
+      <button id="btn-preload">⬇ 모델 미리 받기</button>
+    </div>
+  </section>
+
+  <div id="progress-wrap" class="progress-wrap" style="display:none">
+    <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+    <span id="progress-phase" class="progress-phase"></span>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="reports">리포트</button>
+    <button class="tab" data-tab="settings">설정</button>
+  </nav>
+
+  <main>
+    <section id="tab-reports" class="panel active">
+      <aside class="report-list-wrap">
+        <ul id="report-list"></ul>
+      </aside>
+      <article id="report-view" class="report-view">
+        <p class="muted">왼쪽에서 날짜를 선택하세요.</p>
+      </article>
+    </section>
+
+    <section id="tab-settings" class="panel">
+      <p class="hint">config.yaml — 저장하면 즉시 반영됩니다.</p>
+      <textarea id="config-text" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="btn-save-config" class="primary">설정 저장</button>
+        <span id="config-msg" class="muted"></span>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
