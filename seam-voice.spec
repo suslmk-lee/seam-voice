@@ -13,16 +13,17 @@ datas = [
     ("seam_voice/core/config.yaml", "core"),
 ]
 binaries = []
-hiddenimports = ["webview.platforms.cocoa"]
+hiddenimports = ["webview.platforms.cocoa", "pkg_resources"]
 
-for pkg in ("llama_cpp", "ctranslate2", "faster_whisper", "webview"):
+# sounddevice(portaudio dylib)·webrtcvad(C확장)도 명시 수집해야 패키지 앱에서 녹음이 동작
+for pkg in ("llama_cpp", "ctranslate2", "faster_whisper", "webview", "sounddevice", "webrtcvad"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
     hiddenimports += h
 
 a = Analysis(
-    ["seam_voice/app.py"],
+    ["main.py"],   # 패키지 상대 import 가 동작하도록 launcher 를 entry 로 사용
     pathex=[],
     binaries=binaries,
     datas=datas,

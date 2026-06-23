@@ -19,6 +19,7 @@
 ```
 /Users/minkyu/workspace/seam-voice/
 ├── docs/HANDOFF.md
+├── main.py               # 실행/패키징 launcher(절대 import → 상대 import 보장)
 ├── seam_voice/
 │   ├── __init__.py
 │   ├── app.py            # pywebview 윈도우 + JS↔Python 브리지 + 자동처리 스케줄러
@@ -82,12 +83,26 @@
 - **app/webui**: pywebview 윈도우. Api 메서드를 `pywebview.api.*` 로 호출 — 녹음 시작/정지(스레드), 일시정지(15/30/60), 지금 처리, 리포트 목록/열람(웹뷰 내 마크다운 렌더), config.yaml 편집·저장. 1.5초 폴링으로 상태칩(녹음중/대기/일시정지/정지)·진행률 갱신. `batch_time` 자동 처리는 스케줄러 스레드.
 - **paths/settings**: 설정은 사용자 쓰기 위치(`~/Library/Application Support/seam-voice/config.yaml`)에서 로드하며 없으면 번들 기본값을 복사. 동결 실행은 `resource_path` 가 `sys._MEIPASS` 기준으로 webui/기본config 를 찾는다.
 
-## 4. 현재 상태
+## 4. 현재 상태 (M4에서 검증, 2026-06-23)
 
-- 전체 코드 **작성 완료, `py_compile` 통과**. 스케줄(요일/시간/점심)·일시정지·리포트 빌드 로직은 스모크 테스트로 동작 확인됨.
-- **실기기에서 미검증**: 실제 마이크 녹음, faster-whisper 받아쓰기 품질, llama-cpp-python 분류/요약 품질, pywebview UI, PyInstaller `.app` 빌드는 맥에서 직접 돌려봐야 함(이 개발 환경엔 sounddevice/webrtcvad/faster-whisper/pywebview/llama-cpp-python 미설치).
-- 화자 분리(pyannote)는 **미구현(스텁)** — config에서 기본 off.
-- **백그라운드 상주 제약**: 현재는 창을 닫으면 앱(녹음 포함)이 종료된다. 항상 켜두려면 창을 최소화해 두거나, 백로그의 트레이/launchd 작업이 필요.
+검증 완료:
+- 의존성 설치(llama-cpp-python Metal arm64 빌드, pywebview 6.2.1, faster-whisper 1.2.1, ctranslate2, pyobjc-WebKit), 전체 import.
+- 마이크 캡처(실오디오 수신 확인), VAD 녹음 루프 정상 개폐.
+- **받아쓰기**: faster-whisper `large-v3` 가 한국어 문장을 정확히 받아씀(`say` 합성 음성으로 검증).
+- **LLM**: llama-cpp-python + `Qwen2.5-7B` 가 분류(JSON 강제 파싱)·일일 요약을 정확히 수행. 키워드 우선 매칭 경로도 동작.
+- **파이프라인 end-to-end**: WAV 3건 → 받아쓰기 → 보관2/삭제1 → 요약 → 리포트 정상.
+- **PyInstaller `.app`**: 빌드(248MB) + 번들 실행파일 기동 성공. webui·config·libllama·libggml-metal·_webrtcvad·libportaudio 동봉 확인.
+- 스케줄/일시정지/리포트 빌드 단위 로직.
+
+빌드 시 주의(겪은 이슈, 해결됨):
+- `setuptools>=81` 은 `pkg_resources` 제거 → webrtcvad import 깨짐. `requirements.txt` 에 `setuptools<81` 고정.
+- PyInstaller entry 를 `seam_voice/app.py` 로 두면 `__main__` 실행 시 상대 import 실패 → `main.py` launcher 를 entry 로.
+- sounddevice(portaudio)·webrtcvad(C확장)는 spec 에서 `collect_all` 로 명시 수집해야 동봉됨.
+
+미검증/남음:
+- pywebview **GUI 창에서의 버튼 동작**(녹음/처리 트리거)은 개발 실행으로 띄워 클릭 검증 권장(코드 경로는 검증됨).
+- 화자 분리(pyannote)는 **미구현(스텁)** — config 기본 off.
+- **백그라운드 상주 제약**: 창을 닫으면 앱(녹음 포함) 종료. 상시 가동은 백로그 2번(트레이/launchd).
 
 ## 5. 다음 작업 백로그 (우선순위 순)
 
