@@ -41,10 +41,11 @@ llm:
   model_repo: "bartowski/Qwen2.5-7B-Instruct-GGUF"   # 첫 실행 시 자동 다운로드
   model_file: "Qwen2.5-7B-Instruct-Q4_K_M.gguf"      # 약 4.7GB
   model_path: ""                       # 직접 받은 .gguf 경로를 쓰려면 여기에(설정 시 repo 무시)
-  n_ctx: 8192
+  n_ctx: 16384                         # 컨텍스트(모델은 32768까지 지원; RAM과 절충)
   n_gpu_layers: -1                     # Apple Silicon Metal: -1=전체 GPU 오프로드
   temperature: 0.2
   max_tokens: 1024
+  summary_chunk_chars: 8000            # 하루치가 길면 이 단위로 나눠 map-reduce 요약
 
 retention_rules:
   raw_audio_days: 7                    # 원본 보관 일수(이후 자동 삭제)

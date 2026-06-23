@@ -113,7 +113,7 @@
 3. **whisper.cpp(Metal) 백엔드 추가**: `transcription.engine: whisper.cpp` 경로 구현. M-시리즈에서 faster-whisper(CPU)보다 빠름.
 4. **화자 분리 구현**: pyannote.audio + HF 토큰 연동, 익명 화자1/2 라벨을 리포트에 표기. 리포트에서 수동 라벨 보정.
 5. **UI 개선**: 리포트 내 검색, 설정을 폼으로(yaml 직접편집 대체), 모델 다운로드 진행률 표시.
-6. **견고성**: 녹음 스레드 크래시 자동 재시작, 디스크 용량 모니터링/알림, 원본 오디오 암호화 저장 옵션.
+6. **견고성**: ~~녹음 스트림 오류 자동 재시작~~(완료, recorder.run 재시도 루프)·~~파일 로깅~~(완료, `~/Library/Logs/seam-voice/`)·~~배치 per-file 예외 격리~~(완료). 남음: 디스크 용량 모니터링/알림, 원본 오디오 **암호화 저장 옵션**(#11).
 7. **테스트**: settings 스케줄 로직 pytest화, processor를 가짜 LLM/Whisper로 모킹해 파이프라인 테스트.
 
 ## 6. 셋업 (README와 동일)

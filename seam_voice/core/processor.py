@@ -21,7 +21,10 @@ from pathlib import Path
 from typing import Callable
 
 from .llm import LocalLLM
+from .logsetup import get_logger
 from .settings import Settings, is_on_ac_power
+
+log = get_logger("processor")
 
 Progress = Callable[[int, int, str], None]
 
@@ -120,7 +123,14 @@ def classify(text: str, settings: Settings, llm: LocalLLM | None = None) -> dict
 # ---- 요약 -------------------------------------------------------------
 def summarize_day(joined: str, settings: Settings, llm: LocalLLM | None = None) -> str:
     llm = llm or LocalLLM(settings)
-    return llm.generate(_SUMMARY_PROMPT.format(joined=joined[:12000])).strip()
+    chunk = int(settings.get("llm.summary_chunk_chars", 8000))
+    if len(joined) <= chunk:
+        return llm.generate(_SUMMARY_PROMPT.format(joined=joined)).strip()
+    # 하루치가 길면 컨텍스트 초과를 막기 위해 map-reduce 요약
+    parts = [joined[i:i + chunk] for i in range(0, len(joined), chunk)]
+    log.info("요약 map-reduce: %d청크", len(parts))
+    partials = [llm.generate(_SUMMARY_PROMPT.format(joined=p)).strip() for p in parts]
+    return llm.generate(_SUMMARY_PROMPT.format(joined="\n\n".join(partials))).strip()
 
 
 # ---- 리포트 -----------------------------------------------------------
@@ -174,17 +184,22 @@ def cleanup(settings: Settings) -> None:
             continue
         if day < cutoff:
             shutil.rmtree(day_dir, ignore_errors=True)
-            print(f"[cleanup] 기간 초과 삭제: {day_dir.name}")
+            log.info("[cleanup] 기간 초과 삭제: %s", day_dir.name)
 
-    # 2) 용량 상한 초과 시 오래된 파일부터 삭제
+    # 2) 용량 상한 초과 시 오래된 파일부터 삭제 (총량 1회 계산 후 빼면서 삭제)
     max_bytes = float(settings.get("retention_rules.max_storage_gb", 20)) * 1024 ** 3
-    while _dir_size(raw) > max_bytes:
-        wavs = sorted(raw.rglob("*.wav"), key=lambda p: p.stat().st_mtime)
-        if not wavs:
+    wavs = sorted(raw.rglob("*.wav"), key=lambda p: p.stat().st_mtime)
+    total = sum(p.stat().st_size for p in wavs if p.is_file())
+    for wav in wavs:
+        if total <= max_bytes:
             break
-        oldest = wavs[0]
-        oldest.unlink(missing_ok=True)
-        print(f"[cleanup] 용량 초과 삭제: {oldest}")
+        try:
+            size = wav.stat().st_size
+            wav.unlink()
+            total -= size
+            log.info("[cleanup] 용량 초과 삭제: %s", wav)
+        except OSError:
+            continue
 
     # 3) 빈 날짜 폴더 제거
     for day_dir in list(raw.iterdir()):
@@ -197,6 +212,7 @@ def process_day(
     date_str: str | None = None,
     settings: Settings | None = None,
     llm: LocalLLM | None = None,
+    model=None,
     progress: Progress | None = None,
 ) -> Path | None:
     def report_progress(done: int, total: int, phase: str) -> None:
@@ -209,28 +225,31 @@ def process_day(
 
     if settings.get("processing.require_ac_power", True) and not is_on_ac_power():
         report_progress(0, 0, "전원 미연결 — 일괄 처리 건너뜀")
-        print("[processor] 전원 미연결 — 일괄 처리 건너뜀.")
+        log.info("전원 미연결 — 일괄 처리 건너뜀.")
         return None
 
     llm = llm or LocalLLM(settings)
     day_dir = settings.raw_audio_dir / date_str
     wavs = sorted(day_dir.glob("*.wav")) if day_dir.exists() else []
     total = len(wavs)
-    print(f"[processor] {date_str}: WAV {total}개 처리 시작")
+    log.info("%s: WAV %d개 처리 시작", date_str, total)
     report_progress(0, total, "받아쓰기 준비")
 
-    model = None
     kept: list[dict] = []
     discarded: list[dict] = []
     for i, wav in enumerate(wavs, 1):
         if model is None:
             report_progress(i - 1, total, "Whisper 모델 로딩")
-            model = load_whisper(settings)  # 첫 파일에서만 로드
+            model = load_whisper(settings)  # 첫 파일에서만 로드(또는 호출측에서 주입)
         report_progress(i - 1, total, f"받아쓰기 {i}/{total}")
-        text = transcribe_file(model, wav, settings)
+        try:
+            text = transcribe_file(model, wav, settings)
+        except Exception as exc:  # 손상/잠긴 WAV 1개가 전체 배치를 막지 않게
+            log.warning("받아쓰기 실패 — 스킵: %s (%s)", wav.name, exc)
+            continue
         if not text:
             continue
-        verdict = classify(text, settings, llm=llm)
+        verdict = classify(text, settings, llm=llm)  # classify 내부에서 예외→보관 처리
         item = {"file": wav.name, "text": text, **verdict}
         if verdict["keep"]:
             kept.append(item)
@@ -255,11 +274,14 @@ def process_day(
     cleanup(settings)
     msg = f"완료 (보관 {len(kept)} / 삭제 {len(discarded)})"
     report_progress(total, total, msg)
-    print(f"[processor] 리포트: {report_path} — {msg}")
+    log.info("리포트: %s — %s", report_path, msg)
     return report_path
 
 
 def main(argv: list[str] | None = None) -> None:
+    from .logsetup import setup_logging
+
+    setup_logging()
     argv = sys.argv[1:] if argv is None else argv
     process_day(argv[0] if argv else None)
 

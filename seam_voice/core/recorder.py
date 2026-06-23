@@ -21,13 +21,17 @@ import wave
 import sounddevice as sd
 import webrtcvad
 
+from .logsetup import get_logger
 from .settings import Settings
+
+log = get_logger("recorder")
 
 
 class Recorder:
-    def __init__(self, settings: Settings | None = None):
+    def __init__(self, settings: Settings | None = None, on_error=None):
         s = settings or Settings()
         self.settings = s
+        self.on_error = on_error      # 스트림 오류 시 콜백(메시지) — UI 알림용
 
         self.sample_rate = int(s.get("audio.sample_rate", 16000))
         self.channels = int(s.get("audio.channels", 1))
@@ -47,6 +51,8 @@ class Recorder:
 
     # ---- 오디오 콜백 ---------------------------------------------------
     def _callback(self, indata, frames, time_info, status):  # noqa: D401
+        if status:
+            log.warning("오디오 입력 status: %s", status)  # 입력 오버플로 등
         self._q.put(bytes(indata))
 
     def _drain_queue(self) -> None:
@@ -70,7 +76,7 @@ class Recorder:
             wf.setsampwidth(2)
             wf.setframerate(self.sample_rate)
             wf.writeframes(b"".join(frames))
-        print(f"[recorder] 저장: {path} ({duration:.1f}s)")
+        log.info("저장: %s (%.1fs)", path, duration)
 
     # ---- 제어 ---------------------------------------------------------
     def stop(self, *_):
@@ -85,17 +91,40 @@ class Recorder:
 
     # ---- 메인 루프 ----------------------------------------------------
     def run(self) -> None:
+        """스트림을 열고 녹음한다. 스트림 오류 시 3초 후 자동 재시작(상주용)."""
         self.settings.ensure_dirs()
         self._install_signal_handlers()
         self._running = True
+        log.info("시작 — 스케줄/일시정지에 따라 발화 구간만 저장합니다.")
 
+        while self._running:
+            try:
+                self._run_stream()
+            except Exception as exc:  # 장치 분리·절전/깨어남 등
+                log.exception("녹음 스트림 오류 — 3초 후 재시작: %s", exc)
+                if self.on_error:
+                    try:
+                        self.on_error(str(exc))
+                    except Exception:
+                        pass
+                self._drain_queue()
+                for _ in range(30):           # stop() 에 반응하며 대기
+                    if not self._running:
+                        break
+                    time.sleep(0.1)
+            else:
+                break                          # stop() 으로 정상 종료
+        log.info("종료.")
+
+    def _run_stream(self) -> None:
         ring: "collections.deque[bytes]" = collections.deque(maxlen=self.ring_frames)
         triggered = False
         voiced: list[bytes] = []
         seg_start: dt.datetime | None = None
         last_voice = 0.0
+        gate_ok = True
+        last_gate = 0.0
 
-        print("[recorder] 시작 — 스케줄/일시정지에 따라 발화 구간만 저장합니다.")
         with sd.RawInputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
@@ -104,8 +133,12 @@ class Recorder:
             callback=self._callback,
         ):
             while self._running:
-                # 게이팅: 허용 시간대가 아니거나 일시정지면 대기
-                if not self.settings.is_within_schedule() or self.settings.is_paused():
+                now = time.monotonic()
+                # 게이팅 판정은 ~1초에 한 번만(프레임마다 pause 파일 읽기 방지)
+                if now - last_gate >= 1.0:
+                    gate_ok = self.settings.is_within_schedule() and not self.settings.is_paused()
+                    last_gate = now
+                if not gate_ok:
                     if triggered:
                         self._flush(voiced, seg_start)
                         triggered, voiced = False, []
@@ -144,10 +177,12 @@ class Recorder:
 
         if triggered and seg_start is not None:
             self._flush(voiced, seg_start)
-        print("[recorder] 종료.")
 
 
 def main() -> None:
+    from .logsetup import setup_logging
+
+    setup_logging()
     Recorder().run()
 
 

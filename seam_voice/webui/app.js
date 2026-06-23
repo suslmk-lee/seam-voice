@@ -33,7 +33,14 @@ async function refresh() {
   pill.textContent = label; pill.className = "pill " + cls;
   dot.className = "dot " + (cls === "off" ? "" : cls);
 
-  $("#schedule").textContent = s.within_schedule ? "허용 시간대" : "허용 시간대 아님";
+  const sched = $("#schedule");
+  if (s.rec_error) {
+    sched.textContent = "⚠️ 녹음오류: " + s.rec_error.slice(0, 50);
+    sched.style.color = "var(--rec)";
+  } else {
+    sched.textContent = s.within_schedule ? "허용 시간대" : "허용 시간대 아님";
+    sched.style.color = "";
+  }
   let llm = "LLM: " + llmLabel(s.llm_status);
   if (s.llm_status === "error" && s.llm_error) llm += " (" + s.llm_error.slice(0, 40) + "…)";
   $("#llm").textContent = llm;

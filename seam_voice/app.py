@@ -10,16 +10,21 @@
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 import threading
 import time
 
 import webview
+import yaml
 
 from .core import processor
 from .core.llm import LocalLLM
+from .core.logsetup import get_logger
 from .core.paths import resource_path
 from .core.recorder import Recorder
 from .core.settings import Settings
+
+log = get_logger("app")
 
 
 class Api:
@@ -30,6 +35,9 @@ class Api:
         self._rec: Recorder | None = None
         self._rec_thread: threading.Thread | None = None
         self._batch_thread: threading.Thread | None = None
+        self._batch_lock = threading.Lock()    # 배치 중복 시작 방지(#10)
+        self._whisper = None                   # Whisper 모델 캐시(#8)
+        self._rec_error = ""                   # 마지막 녹음 스트림 오류(#6)
         self._progress: dict = {"phase": "idle", "done": 0, "total": 0}
         self._last_batch_date: dt.date | None = None
 
@@ -46,6 +54,7 @@ class Api:
             "paused_until": pu.isoformat() if pu else "",
             "llm_status": self.llm.status,
             "llm_error": self.llm.error,
+            "rec_error": self._rec_error,
             "batch_running": self._batch_thread is not None and self._batch_thread.is_alive(),
             "progress": self._progress,
             "today": dt.date.today().isoformat(),
@@ -55,10 +64,14 @@ class Api:
     def start_recording(self) -> dict:
         if self._recording():
             return {"ok": False, "msg": "이미 녹음 중입니다."}
-        self._rec = Recorder(self.settings)
+        self._rec_error = ""
+        self._rec = Recorder(self.settings, on_error=self._on_rec_error)
         self._rec_thread = threading.Thread(target=self._rec.run, daemon=True)
         self._rec_thread.start()
         return {"ok": True}
+
+    def _on_rec_error(self, msg: str) -> None:
+        self._rec_error = msg
 
     def stop_recording(self) -> dict:
         if self._rec:
@@ -79,12 +92,13 @@ class Api:
 
     # ---- 일괄 처리 ----------------------------------------------------
     def process_now(self, date: str | None = None) -> dict:
-        if self._batch_thread and self._batch_thread.is_alive():
-            return {"ok": False, "msg": "이미 처리 중입니다."}
-        self._batch_thread = threading.Thread(
-            target=self._run_batch, args=(date,), daemon=True
-        )
-        self._batch_thread.start()
+        with self._batch_lock:                 # check-then-start 경쟁 방지(#10)
+            if self._batch_thread and self._batch_thread.is_alive():
+                return {"ok": False, "msg": "이미 처리 중입니다."}
+            self._batch_thread = threading.Thread(
+                target=self._run_batch, args=(date,), daemon=True
+            )
+            self._batch_thread.start()
         return {"ok": True}
 
     def _set_progress(self, done: int, total: int, phase: str) -> None:
@@ -92,10 +106,15 @@ class Api:
 
     def _run_batch(self, date: str | None) -> None:
         try:
+            if self._whisper is None:          # Whisper 모델 캐시(#8) — 재처리 시 재로드 방지
+                self._set_progress(0, 0, "Whisper 모델 로딩")
+                self._whisper = processor.load_whisper(self.settings)
             processor.process_day(
-                date, self.settings, llm=self.llm, progress=self._set_progress
+                date, self.settings, llm=self.llm,
+                model=self._whisper, progress=self._set_progress,
             )
         except Exception as exc:  # 백그라운드 — UI 진행표시로만 보고
+            log.exception("일괄 처리 오류: %s", exc)
             self._set_progress(0, 0, f"오류: {exc}")
 
     # ---- 리포트 -------------------------------------------------------
@@ -114,9 +133,20 @@ class Api:
         return self.settings.config_path.read_text(encoding="utf-8")
 
     def save_config_text(self, text: str) -> dict:
+        # 먼저 YAML 유효성 검증 — 잘못된 설정을 디스크에 쓰면 다음 실행이 깨짐(#2)
         try:
-            self.settings.config_path.write_text(text, encoding="utf-8")
+            parsed = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            return {"ok": False, "msg": f"YAML 오류: {exc}"}
+        if not isinstance(parsed, dict):
+            return {"ok": False, "msg": "설정 최상위는 매핑(key: value)이어야 합니다."}
+        try:
+            path = self.settings.config_path
+            if path.exists():                  # 직전 설정 백업
+                shutil.copyfile(path, path.with_name(path.name + ".bak"))
+            path.write_text(text, encoding="utf-8")
             self.settings.reload()
+            self._whisper = None               # 모델/엔진 설정이 바뀌었을 수 있음 → 캐시 무효화
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "msg": str(exc)}
@@ -146,6 +176,9 @@ class Api:
 
 
 def main() -> None:
+    from .core.logsetup import setup_logging
+
+    setup_logging()
     api = Api()
     api.start_scheduler()
     if api.settings.get("ui.start_recording_on_launch", False):
@@ -164,7 +197,7 @@ def main() -> None:
 
         setup_tray(api, window, dock_icon=bool(api.settings.get("ui.dock_icon", False)))
     except Exception as exc:  # noqa: BLE001
-        print(f"[app] 트레이 초기화 실패(창 모드로 계속): {exc}")
+        log.warning("트레이 초기화 실패(창 모드로 계속): %s", exc)
 
     webview.start()
 
