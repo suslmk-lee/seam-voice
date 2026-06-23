@@ -20,8 +20,14 @@ seam_voice/
 │  ├─ llm.py         # llama-cpp-python 래퍼(첫 실행 시 모델 다운로드)
 │  ├─ processor.py   # faster-whisper 받아쓰기 → 분류 → 요약 → 리포트 → 정리
 │  └─ config.yaml    # 기본 설정(앱 첫 실행 시 사용자 위치로 복사됨)
+├─ tray.py           # macOS 메뉴바(NSStatusItem) 상주 — 창 닫아도 녹음 유지
 └─ webui/            # index.html / style.css / app.js
 ```
+
+**메뉴바 상주**: 창의 닫기 버튼을 눌러도 종료되지 않고 **숨김**되며 녹음/스케줄은 계속된다
+(pywebview `closing` 이벤트를 취소하고 hide). 제어는 메뉴바 아이콘(🎙️ 녹음·시간대 / 🔴 대기 /
+⏸ 일시정지 / ⚪️ 정지)의 메뉴로 한다: 창 열기·숨기기, 녹음 시작/정지, 일시정지(15/30/60/해제),
+지금 처리, 종료. 기본은 Dock 아이콘 없는 메뉴바 전용(`ui.dock_icon`).
 
 데이터(기본 `~/seam-voice-data`, `config.yaml`의 `storage.base_dir`로 변경):
 
@@ -76,6 +82,8 @@ open dist/seam-voice.app                  # 더블클릭 실행
 | `llm.{model_repo,model_file,model_path,n_gpu_layers}` | 로컬 GGUF LLM |
 | `retention_rules.*` | 보관 일수/용량/제3자 대화 폐기/키워드 |
 | `processing.{batch_time,require_ac_power}` | 자동 처리 시각/전원 조건 |
+| `ui.dock_icon` | false=메뉴바 전용(Dock 숨김), true=Dock 아이콘 표시 |
+| `ui.start_recording_on_launch` | 앱 시작 시 자동 녹음 시작(상주용) |
 
 ## 프라이버시 / 법적 제약 (유지)
 
@@ -86,6 +94,6 @@ open dist/seam-voice.app                  # 더블클릭 실행
 
 ## 상태
 
-프로토타입. 스케줄/일시정지/리포트 로직은 검증됨. 실기기(M4)에서 마이크 녹음·받아쓰기·
-LLM 분류/요약 품질, pywebview UI, .app 빌드는 스모크 테스트 필요. 화자 분리(pyannote)는
-미구현 스텁(기본 off). 배경·백로그는 `docs/HANDOFF.md` 참고.
+M4에서 검증됨: 의존성 설치, 마이크 캡처, faster-whisper(large-v3) 받아쓰기, llama-cpp-python
+(Qwen2.5-7B) 분류/요약, end-to-end 파이프라인, PyInstaller `.app` 빌드·기동, 메뉴바 상주 로직.
+화자 분리(pyannote)는 미구현 스텁(기본 off). 배경·백로그는 `docs/HANDOFF.md` 참고.

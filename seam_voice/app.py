@@ -148,7 +148,9 @@ class Api:
 def main() -> None:
     api = Api()
     api.start_scheduler()
-    webview.create_window(
+    if api.settings.get("ui.start_recording_on_launch", False):
+        api.start_recording()
+    window = webview.create_window(
         "seam-voice",
         url=str(resource_path("webui/index.html")),
         js_api=api,
@@ -156,6 +158,14 @@ def main() -> None:
         height=640,
         min_size=(680, 480),
     )
+    # 메뉴바 상주(창 닫아도 녹음 유지). 실패해도 창 모드로 계속 동작.
+    try:
+        from .tray import setup_tray
+
+        setup_tray(api, window, dock_icon=bool(api.settings.get("ui.dock_icon", False)))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[app] 트레이 초기화 실패(창 모드로 계속): {exc}")
+
     webview.start()
 
 

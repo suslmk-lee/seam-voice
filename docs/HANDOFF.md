@@ -30,6 +30,7 @@
 │   │   ├── llm.py        # llama-cpp-python 래퍼(첫 실행 시 GGUF 다운로드)
 │   │   ├── processor.py  # 받아쓰기 → 분류 → 요약 → 리포트 → 정리
 │   │   └── config.yaml   # 기본 설정(앱 첫 실행 시 사용자 위치로 복사)
+│   ├── tray.py           # macOS 메뉴바(NSStatusItem) 상주 — 창 닫아도 녹음 유지
 │   └── webui/            # index.html / style.css / app.js
 ├── seam-voice.spec       # PyInstaller 단일 .app 스펙
 ├── requirements.txt
@@ -92,6 +93,7 @@
 - **LLM**: llama-cpp-python + `Qwen2.5-7B` 가 분류(JSON 강제 파싱)·일일 요약을 정확히 수행. 키워드 우선 매칭 경로도 동작.
 - **파이프라인 end-to-end**: WAV 3건 → 받아쓰기 → 보관2/삭제1 → 요약 → 리포트 정상.
 - **PyInstaller `.app`**: 빌드(248MB) + 번들 실행파일 기동 성공. webui·config·libllama·libggml-metal·_webrtcvad·libportaudio 동봉 확인.
+- **메뉴바 상주(tray.py)**: NSStatusItem 생성, 창 닫기→숨김(상주)·종료 메뉴→실제 종료 로직을 pywebview Event 로 결정적 검증. 트레이 포함 번들 기동 OK.
 - 스케줄/일시정지/리포트 빌드 단위 로직.
 
 빌드 시 주의(겪은 이슈, 해결됨):
@@ -100,14 +102,14 @@
 - sounddevice(portaudio)·webrtcvad(C확장)는 spec 에서 `collect_all` 로 명시 수집해야 동봉됨.
 
 미검증/남음:
-- pywebview **GUI 창에서의 버튼 동작**(녹음/처리 트리거)은 개발 실행으로 띄워 클릭 검증 권장(코드 경로는 검증됨).
+- pywebview **GUI 창/메뉴바 메뉴의 실제 클릭 동작**은 개발 실행으로 띄워 클릭 검증 권장(코드 경로·상주 로직은 검증됨).
 - 화자 분리(pyannote)는 **미구현(스텁)** — config 기본 off.
-- **백그라운드 상주 제약**: 창을 닫으면 앱(녹음 포함) 종료. 상시 가동은 백로그 2번(트레이/launchd).
+- **로그인 시 자동 실행**: 아직 미구현(launchd LaunchAgent 또는 로그인 항목 등록). 상주 자체는 tray 로 해결됨.
 
 ## 5. 다음 작업 백로그 (우선순위 순)
 
 1. **실기기 스모크 테스트 + 빌드**: M4에서 `pip install -r requirements.txt` → `python -m seam_voice.app` 로 녹음→처리→리포트 end-to-end 확인. 이어서 `pyinstaller seam-voice.spec` 로 `.app` 빌드(네이티브 패키지가 많아 spec 조정 가능성: llama_cpp의 `*.metal`/`libllama`, ctranslate2, portaudio, pyobjc WebKit 동봉 확인).
-2. **트레이 상주 / 백그라운드**: 창을 닫아도 녹음이 계속되도록 트레이 아이콘(pystray, 단 macOS 메인루프 충돌 주의) 또는 launchd 로그인 항목. 현재는 창 종료=앱 종료.
+2. ~~트레이 상주~~ **(완료)**: `tray.py` 의 NSStatusItem 으로 창 닫아도 녹음 유지. 남은 건 **로그인 시 자동 실행**(launchd LaunchAgent plist 또는 시스템설정 로그인 항목 등록)뿐.
 3. **whisper.cpp(Metal) 백엔드 추가**: `transcription.engine: whisper.cpp` 경로 구현. M-시리즈에서 faster-whisper(CPU)보다 빠름.
 4. **화자 분리 구현**: pyannote.audio + HF 토큰 연동, 익명 화자1/2 라벨을 리포트에 표기. 리포트에서 수동 라벨 보정.
 5. **UI 개선**: 리포트 내 검색, 설정을 폼으로(yaml 직접편집 대체), 모델 다운로드 진행률 표시.

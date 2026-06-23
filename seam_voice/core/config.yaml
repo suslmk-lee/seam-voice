@@ -60,3 +60,7 @@ processing:
   batch_time: "18:00"                  # 하루 1회 자동 일괄 처리 시각
   require_ac_power: true               # 받아쓰기/요약은 전원 연결 시에만
   delete_audio_after_discard: true     # keep=false 판정 시 해당 오디오 즉시 삭제
+
+ui:
+  dock_icon: false                     # false=메뉴바 전용(Dock 숨김), true=Dock 아이콘도 표시
+  start_recording_on_launch: false     # 앱 시작 시 자동으로 녹음 시작(상주용)
