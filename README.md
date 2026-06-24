@@ -97,3 +97,7 @@ open dist/seam-voice.app                  # 더블클릭 실행
 M4에서 검증됨: 의존성 설치, 마이크 캡처, faster-whisper(large-v3) 받아쓰기, llama-cpp-python
 (Qwen2.5-7B) 분류/요약, end-to-end 파이프라인, PyInstaller `.app` 빌드·기동, 메뉴바 상주 로직.
 화자 분리(pyannote)는 미구현 스텁(기본 off). 배경·백로그는 `docs/HANDOFF.md` 참고.
+
+## 라이선스
+
+[MIT](LICENSE)
